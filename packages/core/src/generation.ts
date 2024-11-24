@@ -1,17 +1,21 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createGroq } from "@ai-sdk/groq";
 import { createOpenAI } from "@ai-sdk/openai";
-import { getModel } from "./models.ts";
-import { IImageDescriptionService, ModelClass } from "./types.ts";
-import { generateText as aiGenerateText } from "ai";
+import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+import {
+    generateObject as aiGenerateObject,
+    generateText as aiGenerateText,
+    GenerateObjectResult,
+} from "ai";
 import { Buffer } from "buffer";
 import { createOllama } from "ollama-ai-provider";
 import OpenAI from "openai";
-import { default as tiktoken, TiktokenModel } from "tiktoken";
+import { encoding_for_model, TiktokenModel } from "tiktoken";
 import Together from "together-ai";
+import { ZodSchema } from "zod";
 import { elizaLogger } from "./index.ts";
-import models from "./models.ts";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { getModel, models } from "./models.ts";
 import {
     parseBooleanFromText,
     parseJsonArrayFromText,
@@ -22,7 +26,9 @@ import settings from "./settings.ts";
 import {
     Content,
     IAgentRuntime,
+    IImageDescriptionService,
     ITextGenerationService,
+    ModelClass,
     ModelProviderName,
     ServiceType,
 } from "./types.ts";
@@ -56,10 +62,35 @@ export async function generateText({
         return "";
     }
 
+    elizaLogger.log("Generating text...");
+
+    elizaLogger.info("Generating text with options:", {
+        modelProvider: runtime.modelProvider,
+        model: modelClass,
+    });
+
     const provider = runtime.modelProvider;
     const endpoint =
         runtime.character.modelEndpointOverride || models[provider].endpoint;
-    const model = models[provider].model[modelClass];
+    let model = models[provider].model[modelClass];
+
+    // if runtime.getSetting("LLAMACLOUD_MODEL_LARGE") is true and modelProvider is LLAMACLOUD, then use the large model
+    if (
+        runtime.getSetting("LLAMACLOUD_MODEL_LARGE") &&
+        provider === ModelProviderName.LLAMACLOUD
+    ) {
+        model = runtime.getSetting("LLAMACLOUD_MODEL_LARGE");
+    }
+
+    if (
+        runtime.getSetting("LLAMACLOUD_MODEL_SMALL") &&
+        provider === ModelProviderName.LLAMACLOUD
+    ) {
+        model = runtime.getSetting("LLAMACLOUD_MODEL_SMALL");
+    }
+
+    elizaLogger.info("Selected model:", model);
+
     const temperature = models[provider].settings.temperature;
     const frequency_penalty = models[provider].settings.frequency_penalty;
     const presence_penalty = models[provider].settings.presence_penalty;
@@ -82,6 +113,7 @@ export async function generateText({
         );
 
         switch (provider) {
+            // OPENAI & LLAMACLOUD shared same structure.
             case ModelProviderName.OPENAI:
             case ModelProviderName.LLAMACLOUD: {
                 elizaLogger.debug("Initializing OpenAI model.");
@@ -105,10 +137,10 @@ export async function generateText({
                 break;
             }
 
-            case ModelProviderName.GOOGLE:
-                { const google = createGoogleGenerativeAI();
+            case ModelProviderName.GOOGLE: {
+                const google = createGoogleGenerativeAI();
 
-                const { text: anthropicResponse } = await aiGenerateText({
+                const { text: googleResponse } = await aiGenerateText({
                     model: google(model),
                     prompt: context,
                     system:
@@ -121,8 +153,10 @@ export async function generateText({
                     presencePenalty: presence_penalty,
                 });
 
-                response = anthropicResponse;
-                break; }
+                response = googleResponse;
+                elizaLogger.debug("Received response from Google model.");
+                break;
+            }
 
             case ModelProviderName.ANTHROPIC: {
                 elizaLogger.debug("Initializing Anthropic model.");
@@ -144,6 +178,31 @@ export async function generateText({
 
                 response = anthropicResponse;
                 elizaLogger.debug("Received response from Anthropic model.");
+                break;
+            }
+
+            case ModelProviderName.CLAUDE_VERTEX: {
+                elizaLogger.debug("Initializing Claude Vertex model.");
+
+                const anthropic = createAnthropic({ apiKey });
+
+                const { text: anthropicResponse } = await aiGenerateText({
+                    model: anthropic.languageModel(model),
+                    prompt: context,
+                    system:
+                        runtime.character.system ??
+                        settings.SYSTEM_PROMPT ??
+                        undefined,
+                    temperature: temperature,
+                    maxTokens: max_response_length,
+                    frequencyPenalty: frequency_penalty,
+                    presencePenalty: presence_penalty,
+                });
+
+                response = anthropicResponse;
+                elizaLogger.debug(
+                    "Received response from Claude Vertex model."
+                );
                 break;
             }
 
@@ -194,19 +253,26 @@ export async function generateText({
             }
 
             case ModelProviderName.LLAMALOCAL: {
-                elizaLogger.debug("Using local Llama model for text completion.");
-                response = await runtime
-                    .getService<ITextGenerationService>(
+                elizaLogger.debug(
+                    "Using local Llama model for text completion."
+                );
+                const textGenerationService =
+                    runtime.getService<ITextGenerationService>(
                         ServiceType.TEXT_GENERATION
-                    )
-                    .queueTextCompletion(
-                        context,
-                        temperature,
-                        _stop,
-                        frequency_penalty,
-                        presence_penalty,
-                        max_response_length
                     );
+
+                if (!textGenerationService) {
+                    throw new Error("Text generation service not found");
+                }
+
+                response = await textGenerationService.queueTextCompletion(
+                    context,
+                    temperature,
+                    _stop,
+                    frequency_penalty,
+                    presence_penalty,
+                    max_response_length
+                );
                 elizaLogger.debug("Received response from local Llama model.");
                 break;
             }
@@ -216,7 +282,7 @@ export async function generateText({
                 const serverUrl = models[provider].endpoint;
                 const openai = createOpenAI({ apiKey, baseURL: serverUrl });
 
-                const { text: openaiResponse } = await aiGenerateText({
+                const { text: redpillResponse } = await aiGenerateText({
                     model: openai.languageModel(model),
                     prompt: context,
                     temperature: temperature,
@@ -229,8 +295,8 @@ export async function generateText({
                     presencePenalty: presence_penalty,
                 });
 
-                response = openaiResponse;
-                elizaLogger.debug("Received response from OpenAI model.");
+                response = redpillResponse;
+                elizaLogger.debug("Received response from redpill model.");
                 break;
             }
 
@@ -259,14 +325,14 @@ export async function generateText({
 
             case ModelProviderName.OLLAMA:
                 {
-                    console.debug("Initializing Ollama model.");
+                    elizaLogger.debug("Initializing Ollama model.");
 
                     const ollamaProvider = createOllama({
                         baseURL: models[provider].endpoint + "/api",
                     });
                     const ollama = ollamaProvider(model);
 
-                    console.debug("****** MODEL\n", model);
+                    elizaLogger.debug("****** MODEL\n", model);
 
                     const { text: ollamaResponse } = await aiGenerateText({
                         model: ollama,
@@ -279,8 +345,33 @@ export async function generateText({
 
                     response = ollamaResponse;
                 }
-                console.debug("Received response from Ollama model.");
+                elizaLogger.debug("Received response from Ollama model.");
                 break;
+
+            case ModelProviderName.HEURIST: {
+                elizaLogger.debug("Initializing Heurist model.");
+                const heurist = createOpenAI({
+                    apiKey: apiKey,
+                    baseURL: endpoint,
+                });
+
+                const { text: heuristResponse } = await aiGenerateText({
+                    model: heurist.languageModel(model),
+                    prompt: context,
+                    system:
+                        runtime.character.system ??
+                        settings.SYSTEM_PROMPT ??
+                        undefined,
+                    temperature: temperature,
+                    maxTokens: max_response_length,
+                    frequencyPenalty: frequency_penalty,
+                    presencePenalty: presence_penalty,
+                });
+
+                response = heuristResponse;
+                elizaLogger.debug("Received response from Heurist model.");
+                break;
+            }
 
             default: {
                 const errorMessage = `Unsupported provider: ${provider}`;
@@ -298,23 +389,47 @@ export async function generateText({
 
 /**
  * Truncate the context to the maximum length allowed by the model.
- * @param model The model to use for generateText.
- * @param context The context of the message to be completed.
- * @param max_context_length The maximum length of the context to apply to the generateText.
- * @returns
+ * @param context The text to truncate
+ * @param maxTokens Maximum number of tokens to keep
+ * @param model The tokenizer model to use
+ * @returns The truncated text
  */
-export function trimTokens(context, maxTokens, model) {
-    // Count tokens and truncate context if necessary
-    const encoding = tiktoken.encoding_for_model(model as TiktokenModel);
-    let tokens = encoding.encode(context);
-    const textDecoder = new TextDecoder();
-    if (tokens.length > maxTokens) {
-        tokens = tokens.reverse().slice(maxTokens).reverse();
+export function trimTokens(
+    context: string,
+    maxTokens: number,
+    model: TiktokenModel
+): string {
+    if (!context) return "";
+    if (maxTokens <= 0) throw new Error("maxTokens must be positive");
 
-        context = textDecoder.decode(encoding.decode(tokens));
+    // Get the tokenizer for the model
+    const encoding = encoding_for_model(model);
+
+    try {
+        // Encode the text into tokens
+        const tokens = encoding.encode(context);
+
+        // If already within limits, return unchanged
+        if (tokens.length <= maxTokens) {
+            return context;
+        }
+
+        // Keep the most recent tokens by slicing from the end
+        const truncatedTokens = tokens.slice(-maxTokens);
+
+        // Decode back to text and convert to string
+        const decodedText = encoding.decode(truncatedTokens);
+        return new TextDecoder().decode(decodedText);
+    } catch (error) {
+        console.error("Error in trimTokens:", error);
+        // Return truncated string if tokenization fails
+        return context.slice(-maxTokens * 4); // Rough estimate of 4 chars per token
+    } finally {
+        // Clean up tokenizer resources
+        encoding.free();
     }
-    return context;
 }
+
 /**
  * Sends a message to the model to determine if it should respond to the given context.
  * @param opts - The options for the generateText request
@@ -382,48 +497,19 @@ export async function generateShouldRespond({
  * @param content - The text content to split into chunks
  * @param chunkSize - The maximum size of each chunk in tokens
  * @param bleed - Number of characters to overlap between chunks (default: 100)
- * @param model - The model name to use for tokenization (default: runtime.model)
  * @returns Promise resolving to array of text chunks with bleed sections
  */
 export async function splitChunks(
-    runtime,
     content: string,
-    chunkSize: number,
-    bleed: number = 100,
-    modelClass: string
+    chunkSize: number = 512,
+    bleed: number = 20
 ): Promise<string[]> {
-    const model = models[runtime.modelProvider];
-    console.log("model", model);
+    const textSplitter = new RecursiveCharacterTextSplitter({
+        chunkSize: Number(chunkSize),
+        chunkOverlap: Number(bleed),
+    });
 
-    console.log("model.model.embedding", model.model.embedding);
-    
-    if(!model.model.embedding) {
-        throw new Error("Model does not support embedding");
-    }
-
-    const encoding = tiktoken.encoding_for_model(
-        model.model.embedding as TiktokenModel
-    );
-    const tokens = encoding.encode(content);
-    const chunks: string[] = [];
-    const textDecoder = new TextDecoder();
-
-    for (let i = 0; i < tokens.length; i += chunkSize) {
-        const chunk = tokens.slice(i, i + chunkSize);
-        const decodedChunk = textDecoder.decode(encoding.decode(chunk));
-
-        // Append bleed characters from the previous chunk
-        const startBleed = i > 0 ? content.slice(i - bleed, i) : "";
-        // Append bleed characters from the next chunk
-        const endBleed =
-            i + chunkSize < tokens.length
-                ? content.slice(i + chunkSize, i + chunkSize + bleed)
-                : "";
-
-        chunks.push(startBleed + decodedChunk + endBleed);
-    }
-
-    return chunks;
+    return textSplitter.splitText(content);
 }
 
 /**
@@ -632,6 +718,8 @@ export async function generateMessageResponse({
     let retryLength = 1000; // exponential backoff
     while (true) {
         try {
+            elizaLogger.log("Generating message response..");
+
             const response = await generateText({
                 runtime,
                 context,
@@ -661,6 +749,12 @@ export const generateImage = async (
         width: number;
         height: number;
         count?: number;
+        negativePrompt?: string;
+        numIterations?: number;
+        guidanceScale?: number;
+        seed?: number;
+        modelId?: string;
+        jobId?: string;
     },
     runtime: IAgentRuntime
 ): Promise<{
@@ -676,14 +770,52 @@ export const generateImage = async (
 
     const model = getModel(runtime.character.modelProvider, ModelClass.IMAGE);
     const modelSettings = models[runtime.character.modelProvider].imageSettings;
-    // some fallbacks for backwards compat, should remove in the future
     const apiKey =
         runtime.token ??
+        runtime.getSetting("HEURIST_API_KEY") ??
         runtime.getSetting("TOGETHER_API_KEY") ??
         runtime.getSetting("OPENAI_API_KEY");
-
     try {
-        if (runtime.character.modelProvider === ModelProviderName.LLAMACLOUD) {
+        if (runtime.character.modelProvider === ModelProviderName.HEURIST) {
+            const response = await fetch(
+                "http://sequencer.heurist.xyz/submit_job",
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${apiKey}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        job_id: data.jobId || crypto.randomUUID(),
+                        model_input: {
+                            SD: {
+                                prompt: data.prompt,
+                                neg_prompt: data.negativePrompt,
+                                num_iterations: data.numIterations || 20,
+                                width: data.width || 512,
+                                height: data.height || 512,
+                                guidance_scale: data.guidanceScale || 3,
+                                seed: data.seed || -1,
+                            },
+                        },
+                        model_id: data.modelId || "FLUX.1-dev",
+                        deadline: 60,
+                        priority: 1,
+                    }),
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(
+                    `Heurist image generation failed: ${response.statusText}`
+                );
+            }
+
+            const imageURL = await response.json();
+            return { success: true, data: [imageURL] };
+        } else if (
+            runtime.character.modelProvider === ModelProviderName.LLAMACLOUD
+        ) {
             const together = new Together({ apiKey: apiKey as string });
             const response = await together.images.create({
                 model: "black-forest-labs/FLUX.1-schnell",
@@ -747,11 +879,386 @@ export const generateCaption = async (
     description: string;
 }> => {
     const { imageUrl } = data;
-    const resp = await runtime
-        .getService<IImageDescriptionService>(ServiceType.IMAGE_DESCRIPTION)
-        .describeImage(imageUrl);
+    const imageDescriptionService =
+        runtime.getService<IImageDescriptionService>(
+            ServiceType.IMAGE_DESCRIPTION
+        );
+
+    if (!imageDescriptionService) {
+        throw new Error("Image description service not found");
+    }
+
+    const resp = await imageDescriptionService.describeImage(imageUrl);
     return {
         title: resp.title.trim(),
         description: resp.description.trim(),
     };
 };
+/**
+ * Configuration options for generating objects with a model.
+ */
+export interface GenerationOptions {
+    runtime: IAgentRuntime;
+    context: string;
+    modelClass: TiktokenModel;
+    schema?: ZodSchema;
+    schemaName?: string;
+    schemaDescription?: string;
+    stop?: string[];
+    mode?: "auto" | "json" | "tool";
+    experimental_providerMetadata?: Record<string, unknown>;
+}
+
+/**
+ * Base settings for model generation.
+ */
+interface ModelSettings {
+    prompt: string;
+    temperature: number;
+    maxTokens: number;
+    frequencyPenalty: number;
+    presencePenalty: number;
+    stop?: string[];
+}
+
+/**
+ * Generates structured objects from a prompt using specified AI models and configuration options.
+ *
+ * @param {GenerationOptions} options - Configuration options for generating objects.
+ * @returns {Promise<any[]>} - A promise that resolves to an array of generated objects.
+ * @throws {Error} - Throws an error if the provider is unsupported or if generation fails.
+ */
+export const generateObjectV2 = async ({
+    runtime,
+    context,
+    modelClass,
+    schema,
+    schemaName,
+    schemaDescription,
+    stop,
+    mode = "json",
+}: GenerationOptions): Promise<GenerateObjectResult<unknown>> => {
+    if (!context) {
+        const errorMessage = "generateObject context is empty";
+        console.error(errorMessage);
+        throw new Error(errorMessage);
+    }
+
+    const provider = runtime.modelProvider;
+    const model = models[provider].model[modelClass];
+    if (!model) {
+        throw new Error(`Unsupported model class: ${modelClass}`);
+    }
+    const temperature = models[provider].settings.temperature;
+    const frequency_penalty = models[provider].settings.frequency_penalty;
+    const presence_penalty = models[provider].settings.presence_penalty;
+    const max_context_length = models[provider].settings.maxInputTokens;
+    const max_response_length = models[provider].settings.maxOutputTokens;
+    const apiKey = runtime.token;
+
+    try {
+        context = await trimTokens(context, max_context_length, "gpt-4o");
+
+        const modelOptions: ModelSettings = {
+            prompt: context,
+            temperature,
+            maxTokens: max_response_length,
+            frequencyPenalty: frequency_penalty,
+            presencePenalty: presence_penalty,
+            stop: stop || models[provider].settings.stop,
+        };
+
+        const response = await handleProvider({
+            provider,
+            model,
+            apiKey,
+            schema,
+            schemaName,
+            schemaDescription,
+            mode,
+            modelOptions,
+            runtime,
+            context,
+            modelClass,
+        });
+
+        return response;
+    } catch (error) {
+        console.error("Error in generateObject:", error);
+        throw error;
+    }
+};
+
+/**
+ * Interface for provider-specific generation options.
+ */
+interface ProviderOptions {
+    runtime: IAgentRuntime;
+    provider: ModelProviderName;
+    model: any;
+    apiKey: string;
+    schema?: ZodSchema;
+    schemaName?: string;
+    schemaDescription?: string;
+    mode?: "auto" | "json" | "tool";
+    experimental_providerMetadata?: Record<string, unknown>;
+    modelOptions: ModelSettings;
+    modelClass: string;
+    context: string;
+}
+
+/**
+ * Handles AI generation based on the specified provider.
+ *
+ * @param {ProviderOptions} options - Configuration options specific to the provider.
+ * @returns {Promise<any[]>} - A promise that resolves to an array of generated objects.
+ */
+export async function handleProvider(
+    options: ProviderOptions
+): Promise<GenerateObjectResult<unknown>> {
+    const { provider, runtime, context, modelClass } = options;
+    switch (provider) {
+        case ModelProviderName.OPENAI:
+        case ModelProviderName.LLAMACLOUD:
+            return await handleOpenAI(options);
+        case ModelProviderName.ANTHROPIC:
+            return await handleAnthropic(options);
+        case ModelProviderName.GROK:
+            return await handleGrok(options);
+        case ModelProviderName.GROQ:
+            return await handleGroq(options);
+        case ModelProviderName.LLAMALOCAL:
+            return await generateObject({
+                runtime,
+                context,
+                modelClass,
+            });
+        case ModelProviderName.GOOGLE:
+            return await handleGoogle(options);
+        case ModelProviderName.REDPILL:
+            return await handleRedPill(options);
+        case ModelProviderName.OPENROUTER:
+            return await handleOpenRouter(options);
+        case ModelProviderName.OLLAMA:
+            return await handleOllama(options);
+        default: {
+            const errorMessage = `Unsupported provider: ${provider}`;
+            elizaLogger.error(errorMessage);
+            throw new Error(errorMessage);
+        }
+    }
+}
+/**
+ * Handles object generation for OpenAI.
+ *
+ * @param {ProviderOptions} options - Options specific to OpenAI.
+ * @returns {Promise<GenerateObjectResult<unknown>>} - A promise that resolves to generated objects.
+ */
+async function handleOpenAI({
+    model,
+    apiKey,
+    schema,
+    schemaName,
+    schemaDescription,
+    mode,
+    modelOptions,
+}: ProviderOptions): Promise<GenerateObjectResult<unknown>> {
+    const baseURL = models.openai.endpoint || undefined;
+    const openai = createOpenAI({ apiKey, baseURL });
+    return await aiGenerateObject({
+        model: openai.languageModel(model),
+        schema,
+        schemaName,
+        schemaDescription,
+        mode,
+        ...modelOptions,
+    });
+}
+
+/**
+ * Handles object generation for Anthropic models.
+ *
+ * @param {ProviderOptions} options - Options specific to Anthropic.
+ * @returns {Promise<GenerateObjectResult<unknown>>} - A promise that resolves to generated objects.
+ */
+async function handleAnthropic({
+    model,
+    apiKey,
+    schema,
+    schemaName,
+    schemaDescription,
+    mode,
+    modelOptions,
+}: ProviderOptions): Promise<GenerateObjectResult<unknown>> {
+    const anthropic = createAnthropic({ apiKey });
+    return await aiGenerateObject({
+        model: anthropic.languageModel(model),
+        schema,
+        schemaName,
+        schemaDescription,
+        mode,
+        ...modelOptions,
+    });
+}
+
+/**
+ * Handles object generation for Grok models.
+ *
+ * @param {ProviderOptions} options - Options specific to Grok.
+ * @returns {Promise<GenerateObjectResult<unknown>>} - A promise that resolves to generated objects.
+ */
+async function handleGrok({
+    model,
+    apiKey,
+    schema,
+    schemaName,
+    schemaDescription,
+    mode,
+    modelOptions,
+}: ProviderOptions): Promise<GenerateObjectResult<unknown>> {
+    const grok = createOpenAI({ apiKey, baseURL: models.grok.endpoint });
+    return await aiGenerateObject({
+        model: grok.languageModel(model, { parallelToolCalls: false }),
+        schema,
+        schemaName,
+        schemaDescription,
+        mode,
+        ...modelOptions,
+    });
+}
+
+/**
+ * Handles object generation for Groq models.
+ *
+ * @param {ProviderOptions} options - Options specific to Groq.
+ * @returns {Promise<GenerateObjectResult<unknown>>} - A promise that resolves to generated objects.
+ */
+async function handleGroq({
+    model,
+    apiKey,
+    schema,
+    schemaName,
+    schemaDescription,
+    mode,
+    modelOptions,
+}: ProviderOptions): Promise<GenerateObjectResult<unknown>> {
+    const groq = createGroq({ apiKey });
+    return await aiGenerateObject({
+        model: groq.languageModel(model),
+        schema,
+        schemaName,
+        schemaDescription,
+        mode,
+        ...modelOptions,
+    });
+}
+
+/**
+ * Handles object generation for Google models.
+ *
+ * @param {ProviderOptions} options - Options specific to Google.
+ * @returns {Promise<GenerateObjectResult<unknown>>} - A promise that resolves to generated objects.
+ */
+async function handleGoogle({
+    model,
+    apiKey: _apiKey,
+    schema,
+    schemaName,
+    schemaDescription,
+    mode,
+    modelOptions,
+}: ProviderOptions): Promise<GenerateObjectResult<unknown>> {
+    const google = createGoogleGenerativeAI();
+    return await aiGenerateObject({
+        model: google(model),
+        schema,
+        schemaName,
+        schemaDescription,
+        mode,
+        ...modelOptions,
+    });
+}
+
+/**
+ * Handles object generation for Redpill models.
+ *
+ * @param {ProviderOptions} options - Options specific to Redpill.
+ * @returns {Promise<GenerateObjectResult<unknown>>} - A promise that resolves to generated objects.
+ */
+async function handleRedPill({
+    model,
+    apiKey,
+    schema,
+    schemaName,
+    schemaDescription,
+    mode,
+    modelOptions,
+}: ProviderOptions): Promise<GenerateObjectResult<unknown>> {
+    const redPill = createOpenAI({ apiKey, baseURL: models.redpill.endpoint });
+    return await aiGenerateObject({
+        model: redPill.languageModel(model),
+        schema,
+        schemaName,
+        schemaDescription,
+        mode,
+        ...modelOptions,
+    });
+}
+
+/**
+ * Handles object generation for OpenRouter models.
+ *
+ * @param {ProviderOptions} options - Options specific to OpenRouter.
+ * @returns {Promise<GenerateObjectResult<unknown>>} - A promise that resolves to generated objects.
+ */
+async function handleOpenRouter({
+    model,
+    apiKey,
+    schema,
+    schemaName,
+    schemaDescription,
+    mode,
+    modelOptions,
+}: ProviderOptions): Promise<GenerateObjectResult<unknown>> {
+    const openRouter = createOpenAI({
+        apiKey,
+        baseURL: models.openrouter.endpoint,
+    });
+    return await aiGenerateObject({
+        model: openRouter.languageModel(model),
+        schema,
+        schemaName,
+        schemaDescription,
+        mode,
+        ...modelOptions,
+    });
+}
+
+/**
+ * Handles object generation for Ollama models.
+ *
+ * @param {ProviderOptions} options - Options specific to Ollama.
+ * @returns {Promise<GenerateObjectResult<unknown>>} - A promise that resolves to generated objects.
+ */
+async function handleOllama({
+    model,
+    schema,
+    schemaName,
+    schemaDescription,
+    mode,
+    modelOptions,
+    provider,
+}: ProviderOptions): Promise<GenerateObjectResult<unknown>> {
+    const ollamaProvider = createOllama({
+        baseURL: models[provider].endpoint + "/api",
+    });
+    const ollama = ollamaProvider(model);
+    return await aiGenerateObject({
+        model: ollama,
+        schema,
+        schemaName,
+        schemaDescription,
+        mode,
+        ...modelOptions,
+    });
+}

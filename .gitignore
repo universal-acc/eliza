@@ -2,6 +2,7 @@ node_modules
 /out
 
 .env
+.env.production
 concatenated-output.ts
 embedding-cache.json
 
@@ -33,6 +34,7 @@ twitter_cookies.json
 timeline_cache.json
 
 *.sqlite
+
 characters/
 
 packages/core/src/providers/cache

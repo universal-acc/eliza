@@ -1,3 +1,5 @@
+[@ai16z/eliza v1.0.0](../index.md) / Memory
+
 # Interface: Memory
 
 Represents a memory record, which could be a message or any other piece of information remembered by the system, including its content, associated user IDs, and optionally, its embedding vector for similarity comparisons.
@@ -10,9 +12,9 @@ Represents a memory record, which could be a message or any other piece of infor
 
 #### Defined in
 
-[packages/core/src/types.ts:167](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L167)
+[packages/core/src/types.ts:169](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L169)
 
-***
+---
 
 ### userId
 
@@ -20,9 +22,9 @@ Represents a memory record, which could be a message or any other piece of infor
 
 #### Defined in
 
-[packages/core/src/types.ts:168](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L168)
+[packages/core/src/types.ts:170](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L170)
 
-***
+---
 
 ### agentId
 
@@ -30,9 +32,9 @@ Represents a memory record, which could be a message or any other piece of infor
 
 #### Defined in
 
-[packages/core/src/types.ts:169](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L169)
+[packages/core/src/types.ts:171](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L171)
 
-***
+---
 
 ### createdAt?
 
@@ -40,9 +42,9 @@ Represents a memory record, which could be a message or any other piece of infor
 
 #### Defined in
 
-[packages/core/src/types.ts:170](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L170)
+[packages/core/src/types.ts:172](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L172)
 
-***
+---
 
 ### content
 
@@ -50,9 +52,9 @@ Represents a memory record, which could be a message or any other piece of infor
 
 #### Defined in
 
-[packages/core/src/types.ts:171](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L171)
+[packages/core/src/types.ts:173](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L173)
 
-***
+---
 
 ### embedding?
 
@@ -60,9 +62,9 @@ Represents a memory record, which could be a message or any other piece of infor
 
 #### Defined in
 
-[packages/core/src/types.ts:172](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L172)
+[packages/core/src/types.ts:174](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L174)
 
-***
+---
 
 ### roomId
 
@@ -70,9 +72,9 @@ Represents a memory record, which could be a message or any other piece of infor
 
 #### Defined in
 
-[packages/core/src/types.ts:173](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L173)
+[packages/core/src/types.ts:175](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L175)
 
-***
+---
 
 ### unique?
 
@@ -80,4 +82,4 @@ Represents a memory record, which could be a message or any other piece of infor
 
 #### Defined in
 
-[packages/core/src/types.ts:174](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L174)
+[packages/core/src/types.ts:176](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L176)

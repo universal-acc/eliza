@@ -1,3 +1,5 @@
+[@ai16z/eliza v1.0.0](../index.md) / Character
+
 # Type Alias: Character
 
 > **Character**: `object`
@@ -30,7 +32,7 @@
 
 #### Index Signature
 
- \[`key`: `string`\]: `string`
+\[`key`: `string`\]: `string`
 
 ### bio
 
@@ -82,7 +84,7 @@
 
 #### Index Signature
 
- \[`key`: `string`\]: `string`
+\[`key`: `string`\]: `string`
 
 ### settings.voice?
 
@@ -104,6 +106,34 @@
 
 > `optional` **embeddingModel**: `string`
 
+### clientConfig?
+
+> `optional` **clientConfig**: `object`
+
+### clientConfig.discord?
+
+> `optional` **discord**: `object`
+
+### clientConfig.discord.shouldIgnoreBotMessages?
+
+> `optional` **shouldIgnoreBotMessages**: `boolean`
+
+### clientConfig.discord.shouldIgnoreDirectMessages?
+
+> `optional` **shouldIgnoreDirectMessages**: `boolean`
+
+### clientConfig.telegram?
+
+> `optional` **telegram**: `object`
+
+### clientConfig.telegram.shouldIgnoreBotMessages?
+
+> `optional` **shouldIgnoreBotMessages**: `boolean`
+
+### clientConfig.telegram.shouldIgnoreDirectMessages?
+
+> `optional` **shouldIgnoreDirectMessages**: `boolean`
+
 ### style
 
 > **style**: `object`
@@ -122,4 +152,4 @@
 
 ## Defined in
 
-[packages/core/src/types.ts:327](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L327)
+[packages/core/src/types.ts:329](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L329)

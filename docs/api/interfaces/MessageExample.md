@@ -1,3 +1,5 @@
+[@ai16z/eliza v1.0.0](../index.md) / MessageExample
+
 # Interface: MessageExample
 
 Represents an example of a message, typically used for demonstrating or testing purposes, including optional content and action.
@@ -10,9 +12,9 @@ Represents an example of a message, typically used for demonstrating or testing 
 
 #### Defined in
 
-[packages/core/src/types.ts:181](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L181)
+[packages/core/src/types.ts:183](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L183)
 
-***
+---
 
 ### content
 
@@ -20,4 +22,4 @@ Represents an example of a message, typically used for demonstrating or testing 
 
 #### Defined in
 
-[packages/core/src/types.ts:182](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L182)
+[packages/core/src/types.ts:184](https://github.com/ai16z/eliza/blob/main/packages/core/src/types.ts#L184)
