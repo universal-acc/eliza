@@ -37,7 +37,17 @@ export class DiscordClient extends EventEmitter {
 
     constructor(runtime: IAgentRuntime) {
         super();
+        console.log("Discord Client Constructor - Starting initialization");
+        
         this.apiToken = runtime.getSetting("DISCORD_API_TOKEN") as string;
+        console.log("API Token length:", this.apiToken?.length || "No token found!");
+        
+        if (!this.apiToken) {
+            console.error("No Discord API token found in settings!");
+            throw new Error("Discord API token is required");
+        }
+
+        console.log("Creating Discord.js client with intents");
         this.client = new Client({
             intents: [
                 GatewayIntentBits.Guilds,
@@ -61,11 +71,28 @@ export class DiscordClient extends EventEmitter {
         this.voiceManager = new VoiceManager(this);
         this.messageManager = new MessageManager(this, this.voiceManager);
 
+        // Add error event handler
+        this.client.on('error', (error) => {
+            console.error('Discord Client Error:', error);
+        });
+
+        // Add debug event handler
+        this.client.on('debug', (info) => {
+            console.log('Discord Debug:', info);
+        });
+
+        console.log("Setting up event listeners...");
         this.client.once(Events.ClientReady, this.onClientReady.bind(this));
-        this.client.login(this.apiToken);
+        
+        console.log("Attempting login with token...");
+        this.client.login(this.apiToken).catch(error => {
+            console.error("Login failed:", error);
+            throw error;
+        });
 
         this.setupEventListeners();
 
+        console.log("Registering actions and providers...");
         this.runtime.registerAction(joinvoice);
         this.runtime.registerAction(leavevoice);
         this.runtime.registerAction(summarize);
@@ -75,42 +102,20 @@ export class DiscordClient extends EventEmitter {
 
         this.runtime.providers.push(channelStateProvider);
         this.runtime.providers.push(voiceStateProvider);
+        
+        console.log("Discord client initialization complete");
     }
 
     private setupEventListeners() {
-        // When joining to a new server
+        console.log("Setting up Discord event listeners");
+        
         this.client.on("guildCreate", this.handleGuildCreate.bind(this));
-
-        this.client.on(
-            Events.MessageReactionAdd,
-            this.handleReactionAdd.bind(this)
-        );
-        this.client.on(
-            Events.MessageReactionRemove,
-            this.handleReactionRemove.bind(this)
-        );
-
-        // Handle voice events with the voice manager
-        this.client.on(
-            "voiceStateUpdate",
-            this.voiceManager.handleVoiceStateUpdate.bind(this.voiceManager)
-        );
-        this.client.on(
-            "userStream",
-            this.voiceManager.handleUserStream.bind(this.voiceManager)
-        );
-
-        // Handle a new message with the message manager
-        this.client.on(
-            Events.MessageCreate,
-            this.messageManager.handleMessage.bind(this.messageManager)
-        );
-
-        // Handle a new interaction
-        this.client.on(
-            Events.InteractionCreate,
-            this.handleInteractionCreate.bind(this)
-        );
+        this.client.on(Events.MessageReactionAdd, this.handleReactionAdd.bind(this));
+        this.client.on(Events.MessageReactionRemove, this.handleReactionRemove.bind(this));
+        this.client.on("voiceStateUpdate", this.voiceManager.handleVoiceStateUpdate.bind(this.voiceManager));
+        this.client.on("userStream", this.voiceManager.handleUserStream.bind(this.voiceManager));
+        this.client.on(Events.MessageCreate, this.messageManager.handleMessage.bind(this.messageManager));
+        this.client.on(Events.InteractionCreate, this.handleInteractionCreate.bind(this));
     }
 
     private async onClientReady(readyClient: { user: { tag: any; id: any } }) {
@@ -122,6 +127,7 @@ export class DiscordClient extends EventEmitter {
         await this.onReady();
     }
 
+    // ... rest of your existing methods ...
     async handleReactionAdd(reaction: MessageReaction, user: User) {
         elizaLogger.log("Reaction added");
         // if (user.bot) return;
